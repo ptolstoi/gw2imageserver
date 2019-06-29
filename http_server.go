@@ -22,15 +22,21 @@ func (app *app) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (app *app) serveFile(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-	fileToServe := strings.SplitN(ps.ByName("file"), ".", 2)
+	parts := strings.SplitN(ps.ByName("file"), ".", 2)
 	extension := "png"
-	if len(fileToServe) > 1 {
-		extension = fileToServe[1]
+	if len(parts) > 1 {
+		extension = parts[1]
 	}
-	file, err := app.getFileFromCache(fileToServe[0], extension)
+	fileToServe := parts[0]
+
+	file, err := app.getFileFromCache(fileToServe, extension)
 
 	headers := w.Header()
 	headers.Add("content-type", "application/json")
+
+	if err == nil && file == nil {
+		file, err = app.noFileInCache(fileToServe, extension)
+	}
 
 	if err != nil {
 		w.WriteHeader(500)

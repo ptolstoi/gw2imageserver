@@ -18,6 +18,7 @@ type app struct {
 	listenOn   string
 	server     *http.Server
 	httpRouter *httprouter.Router
+	httpClient *http.Client
 }
 
 func newApp() *app {
@@ -29,6 +30,9 @@ func newApp() *app {
 
 	app := app{
 		listenOn: listenOn,
+		httpClient: &http.Client{
+			Timeout: 15 * time.Second,
+		},
 	}
 
 	app.server = &http.Server{

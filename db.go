@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"log"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -50,21 +51,44 @@ func (app *app) getFileFromCache(fileToLookup string, fileTypeToLookup string) (
 	file := file{}
 	var lastModified string
 
-	if err := row.Scan(
+	err := row.Scan(
 		&file.file,
 		&lastModified,
 		&file.fileType,
 		&file.content,
-	); err != nil && err != sql.ErrNoRows {
+	)
+
+	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	} else if err == sql.ErrNoRows {
 		log.Printf("[getFileFromCache] not found")
 		return nil, nil
 	}
 
-	log.Printf("[getFileFromCache] lastModified: %v", lastModified)
+	file.lastModified, err = time.Parse(time.RFC1123Z, lastModified)
+	if err != nil {
+		return nil, err
+	}
 
 	return &file, nil
+}
+
+func (app *app) saveFileToCache(file *file) error {
+	log.Printf("[saveFileToCache] %v %v", file.file, file.fileType)
+
+	lastModified := file.lastModified.Format(time.RFC1123Z)
+
+	_, err := app.db.Exec(`
+		INSERT INTO
+			raw
+				(
+					file, lastModified, fileType, content
+				)
+		VALUES
+				(?, ?, ?, ?)
+	`, file.file, lastModified, file.fileType, file.content)
+
+	return err
 }
 
 func (app *app) closeDB() {
