@@ -35,7 +35,7 @@ func (app *app) initDB() {
 }
 
 func (app *app) getFileFromCache(fileToLookup string, fileTypeToLookup string) (*file, error) {
-	log.Printf("[getFileFromCache] %v %v", fileToLookup, fileTypeToLookup)
+	log.Printf("[getFileFromCache] fileToLookup=%v type=%v", fileToLookup, fileTypeToLookup)
 
 	row := app.db.QueryRow(`
 	SELECT 
@@ -79,7 +79,7 @@ func (app *app) saveFileToCache(file *file) error {
 	lastModified := file.lastModified.Format(time.RFC1123Z)
 
 	_, err := app.db.Exec(`
-		INSERT INTO
+		INSERT OR REPLACE INTO
 			raw
 				(
 					file, lastModified, fileType, content

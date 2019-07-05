@@ -22,6 +22,9 @@ func (app *app) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (app *app) serveFile(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	noCache := len(r.URL.Query()["noCache"]) != 0
+	log.Printf("nocache: %v", noCache)
+
 	parts := strings.SplitN(ps.ByName("file"), ".", 2)
 	extension := "png"
 	if len(parts) > 1 {
@@ -34,7 +37,7 @@ func (app *app) serveFile(w http.ResponseWriter, r *http.Request, ps httprouter.
 	headers := w.Header()
 	headers.Add("content-type", "application/json")
 
-	if err == nil && file == nil {
+	if err == nil && (file == nil || noCache) {
 		file, err = app.noFileInCache(fileToServe, extension)
 	}
 

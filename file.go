@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"image/png"
 	"io/ioutil"
 	"log"
 	"time"
@@ -113,12 +115,32 @@ func (app *app) noFileInCache(fileID string, fileType string) (*file, error) {
 	}
 
 	if imgRaw != nil {
-		log.Printf("after inflate: %v", len(*imgRaw))
+		log.Printf("after inflate: %v", imgRaw.Bounds())
 	} else {
 		log.Printf("after inflate: nil!")
 	}
 
-	return nil, nil
+	if fileType == "png" {
+		buffer := new(bytes.Buffer)
+
+		if err := png.Encode(buffer, imgRaw); err != nil {
+			return nil, err
+		}
+
+		newFile := file{
+			content:  buffer.Bytes(),
+			file:     fileID,
+			fileType: fileType,
+		}
+
+		if err := app.saveFileToCache(&newFile); err != nil {
+			return nil, err
+		}
+
+		return &newFile, nil
+	}
+
+	return nil, fmt.Errorf("unknown file type")
 }
 
 func checkHeader(data []byte) error {

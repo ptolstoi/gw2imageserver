@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"image"
+	imageColor "image/color"
 	"log"
 )
 
@@ -43,6 +45,12 @@ type bgra struct {
 	a uint8
 }
 
+type DXT1Block struct {
+	Color1  uint16
+	Color2  uint16
+	Indices uint32
+}
+
 const (
 	ffColor            uint16 = 0x10
 	ffAlpha            uint16 = 0x20
@@ -58,13 +66,13 @@ const (
 	cfDecodePlainColor             = 0x08
 )
 
-func inflate(inputRaw []byte, outputSize uint32) (*[]bgra, error) {
+func inflate(inputRaw []byte, outputSize uint32) (image.Image, error) {
 	input := make([]uint32, len(inputRaw)/4)
 	binary.Read(bytes.NewBuffer(inputRaw[:]), binary.LittleEndian, &input)
 
 	state := inflaterState{
 		input:     input,
-		inputSize: uint32(len(input) / 4),
+		inputSize: uint32(len(input)),
 		inputPos:  0,
 
 		head:   0,
@@ -126,20 +134,42 @@ func inflate(inputRaw []byte, outputSize uint32) (*[]bgra, error) {
 
 	result := state.inflateData(aFullFormat, anOutputSize)
 
+	var colors *[]bgra
 	if formatFourCC == fccDXT1n {
 		log.Printf("fccDXT1")
-		colors, err := processDXT1(&result, aFullFormat.width, aFullFormat.height)
+		var err error
+		colors, err = processDXT1(&result, aFullFormat.width, aFullFormat.height)
 
-		log.Printf("colors: %v, error: %v", len(colors), err)
+		if err != nil {
+			return nil, err
+		}
+
+		log.Printf("colors: %v", len(*colors))
 	} else if formatFourCC == fccDXT5n {
 		log.Printf("fccDXT5")
+		return nil, fmt.Errorf("fccDXT5 not implemented yet")
 	} else {
-		log.Printf("unknown formatFourCC: %08X", formatFourCC)
+		return nil, fmt.Errorf("unknown formatFourCC: %08X", formatFourCC)
 	}
 
-	log.Printf("size: %v", len(result))
+	img := image.NewRGBA(image.Rect(0, 0, int(aFullFormat.width), int(aFullFormat.height)))
+	var y uint16
+	var x uint16
+	for y = 0; y < aFullFormat.height; y++ {
+		for x = 0; x < aFullFormat.width; x++ {
+			index := uint(y)*uint(aFullFormat.width) + uint(x)
+			color := (*colors)[index]
 
-	return nil, nil
+			img.SetRGBA(int(x), int(y), imageColor.RGBA{
+				R: color.r,
+				G: color.g,
+				B: color.b,
+				A: color.a,
+			})
+		}
+	}
+
+	return img, nil
 }
 
 func (state *inflaterState) inflateData(fullFormat fullFormat, outputSize uint32) []uint8 {
@@ -202,16 +232,18 @@ func (state *inflaterState) inflateData(fullFormat fullFormat, outputSize uint32
 	}
 
 	if (fullFormat.flags&ffColor) != 0 || (fullFormat.flags&ffBiColorComp) != 0 {
-		log.Printf("LOOP2")
 		aColorSize := uint32(len(aColorBitmap))
+		log.Printf("LOOP2 %v %v", aColorSize, state.inputSize)
 		for i = 0; i < aColorSize && state.inputPos < state.inputSize; i++ {
-			if aColorBitmap[i] {
+			if !aColorBitmap[i] {
 				offset := fullFormat.bytesPerPixelBlock * i
 				if fullFormat.hasTwoComponents {
 					offset += fullFormat.bytesPerComponent
 				}
 
 				data := state.input[state.inputPos]
+
+				// fmt.Printf("%08X\n", data)
 
 				ioOutputTab[offset+0] = uint8((data >> 0) & 0xFF)
 				ioOutputTab[offset+1] = uint8((data >> 8) & 0xFF)
@@ -223,7 +255,7 @@ func (state *inflaterState) inflateData(fullFormat fullFormat, outputSize uint32
 		}
 
 		if fullFormat.bytesPerComponent > 4 {
-			log.Printf("LOOP2")
+			// log.Printf("LOOP3")
 
 			// for (aLoopIndex = 0; aLoopIndex < aColorBitmap.size() && iState.inputPos < iState.inputSize; ++aLoopIndex) {
 			// 	if (!aColorBitmap[aLoopIndex]) {
@@ -233,22 +265,35 @@ func (state *inflaterState) inflateData(fullFormat fullFormat, outputSize uint32
 			// 	}
 			// }
 			for i = 0; i < aColorSize && state.inputPos < state.inputSize; i++ {
-				offset := fullFormat.bytesPerPixelBlock*i + 4
-				if fullFormat.hasTwoComponents {
-					offset += fullFormat.bytesPerComponent
+				if !aColorBitmap[i] {
+					offset := fullFormat.bytesPerPixelBlock*i + 4
+
+					if fullFormat.hasTwoComponents {
+						offset += fullFormat.bytesPerComponent
+					}
+
+					data := state.input[state.inputPos]
+					// fmt.Printf("%08X\n", data)
+
+					ioOutputTab[offset+0] = uint8((data >> 0) & 0xFF)
+					ioOutputTab[offset+1] = uint8((data >> 8) & 0xFF)
+					ioOutputTab[offset+2] = uint8((data >> 16) & 0xFF)
+					ioOutputTab[offset+3] = uint8((data >> 24) & 0xFF)
+
+					state.inputPos++
 				}
-
-				data := state.input[state.inputPos]
-
-				ioOutputTab[offset+0] = uint8((data >> 0) & 0xFF)
-				ioOutputTab[offset+1] = uint8((data >> 8) & 0xFF)
-				ioOutputTab[offset+2] = uint8((data >> 16) & 0xFF)
-				ioOutputTab[offset+3] = uint8((data >> 24) & 0xFF)
-
-				state.inputPos++
 			}
 		}
 	}
+
+	// size := uint32(len(ioOutputTab))
+	// for i = 0; i < size; i++ {
+	// 	fmt.Printf("%02X", ioOutputTab[i])
+	// 	if (i+1)%uint32(fullFormat.width) == 0 {
+	// 		fmt.Printf("\n")
+	// 	}
+	// }
+	// fmt.Printf("\n")
 
 	return ioOutputTab
 }
@@ -268,37 +313,9 @@ func (state *inflaterState) decodeConstantAlphaFrom8Bits(aAlphaBitmap *[]bool, f
 	// }
 }
 
-func processDXT1(data *[]uint8, width uint16, height uint16) ([]bgra, error) {
-	/*
-		reinterpret color:
-			union DXTColor {
-				struct {
-					uint16 red1 : 5;
-					uint16 green1 : 6;
-					uint16 blue1 : 5;
-					uint16 red2 : 5;
-					uint16 green2 : 6;
-					uint16 blue2 : 5;
-				};
-				struct {
-					uint16 color1;
-					uint16 color2;
-				};
-			};
+func processDXT1(data *[]uint8, width uint16, height uint16) (*[]bgra, error) {
 
-			struct DXT1Block {
-				DXTColor colors;
-				uint32   indices;
-			};
-	*/
-
-	// numPixels := width * height
-
-	type DXT1Block struct {
-		Color1  uint16
-		Color2  uint16
-		Indices uint32
-	}
+	numPixels := width * height
 
 	blocks := make([]DXT1Block, len(*data)/8)
 
@@ -307,7 +324,7 @@ func processDXT1(data *[]uint8, width uint16, height uint16) ([]bgra, error) {
 		return nil, err
 	}
 
-	// pixels := make([]bgra, numPixels)
+	pixels := make([]bgra, numPixels)
 
 	numHorizBlocks := width >> 2
 	numVertBlocks := width >> 2
@@ -317,12 +334,102 @@ func processDXT1(data *[]uint8, width uint16, height uint16) ([]bgra, error) {
 
 	for y = 0; y < numVertBlocks; y++ {
 		for x = 0; x < numHorizBlocks; x++ {
-			// block := blocks[y*numHorizBlocks+x]
-			// processDXT1Block(&pixels, block, x * 4, y * 4, width)
+			block := blocks[y*numHorizBlocks+x]
+
+			processDXT1Block(&pixels, &block, x*4, y*4, width)
 		}
 	}
 
-	return nil, nil
+	// for y = 0; y < height; y++ {
+	// 	for x = 0; x < width; x++ {
+	// 		fmt.Printf("%+v ", pixels[y*width+x])
+	// 	}
+	// 	fmt.Printf("\n")
+	// }
+
+	return &pixels, nil
+}
+
+func processDXT1Block(pixelsPtr *[]bgra, block *DXT1Block, blockX uint16, blockY uint16, width uint16) {
+	pixels := *pixelsPtr
+	indices := block.Indices
+	var colors [4]bgra
+
+	processDXTColor(&colors, block, true)
+
+	var y uint16
+	var x uint16
+	for y = 0; y < 4; y++ {
+		curPixel := uint(blockY+y)*uint(width) + uint(blockX) // TODO test if correct
+
+		for x = 0; x < 4; x++ {
+			pixel := pixels[curPixel]
+			index := indices & 3
+
+			pixel.r = colors[index].r
+			pixel.g = colors[index].b
+			pixel.b = colors[index].b
+			pixel.a = colors[index].a
+
+			pixels[curPixel] = pixel
+
+			curPixel++
+			indices >>= 2
+		}
+	}
+}
+
+func processDXTColor(pixel *[4]bgra, block *DXT1Block, isDXT1 bool) {
+	red1 := (block.Color1 & 0xF800) >> 11
+	green1 := (block.Color1 & 0x07E0) >> 5
+	blue1 := (block.Color1 & 0x001F)
+	red2 := (block.Color2 & 0xF800) >> 11
+	green2 := (block.Color2 & 0x07E0) >> 5
+	blue2 := (block.Color2 & 0x001F)
+
+	pixel[0].r = uint8((red1 << 3) | (red1 >> 2))
+	pixel[0].g = uint8((green1 << 2) | (green1 >> 4))
+	pixel[0].b = uint8((blue1 << 3) | (blue1 >> 2))
+
+	pixel[1].r = uint8((red2 << 3) | (red2 >> 2))
+	pixel[1].g = uint8((green2 << 2) | (green2 >> 4))
+	pixel[1].b = uint8((blue2 << 3) | (blue2 >> 2))
+
+	if !isDXT1 || block.Color1 > block.Color2 {
+		pixel[2].r = uint8((uint16(pixel[0].r)*2 + uint16(pixel[1].r)) / 3)
+		pixel[2].g = uint8((uint16(pixel[0].g)*2 + uint16(pixel[1].g)) / 3)
+		pixel[2].b = uint8((uint16(pixel[0].b)*2 + uint16(pixel[1].b)) / 3)
+
+		pixel[3].r = uint8((uint16(pixel[0].r) + uint16(pixel[1].r)*2) / 3)
+		pixel[3].g = uint8((uint16(pixel[0].g) + uint16(pixel[1].g)*2) / 3)
+		pixel[3].b = uint8((uint16(pixel[0].b) + uint16(pixel[1].b)*2) / 3)
+		if isDXT1 {
+			pixel[0].a = 0xFF
+			pixel[1].a = 0xFF
+			pixel[2].a = 0xFF
+			pixel[3].a = 0xFF
+		}
+	} else {
+		pixel[2].r = uint8((uint16(pixel[0].r) + uint16(pixel[1].r)) >> 1)
+		pixel[2].g = uint8((uint16(pixel[0].g) + uint16(pixel[1].g)) >> 1)
+		pixel[2].b = uint8((uint16(pixel[0].b) + uint16(pixel[1].b)) >> 1)
+
+		pixel[3].r = 0
+		pixel[3].g = 0
+		pixel[3].b = 0
+
+		if isDXT1 {
+			pixel[0].a = 0x00
+			pixel[1].a = 0x00
+			pixel[2].a = 0x00
+			pixel[3].a = 0x00
+		}
+	}
+
+	// for _, c := range pixel {
+	// 	fmt.Printf("%+v ", c)
+	// }
+	// fmt.Print("\n")
 }
 
 //
