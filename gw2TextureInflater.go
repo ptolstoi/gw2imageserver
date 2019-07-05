@@ -19,6 +19,9 @@ type inflaterState struct {
 	bits   uint8
 
 	isEmpty bool
+
+	colorBitmap []bool
+	alphaBitmap []bool
 }
 
 type format struct {
@@ -66,7 +69,7 @@ const (
 	cfDecodePlainColor             = 0x08
 )
 
-func inflate(inputRaw []byte, outputSize uint32) (image.Image, error) {
+func inflate(inputRaw []byte) (image.Image, error) {
 	input := make([]uint32, len(inputRaw)/4)
 	binary.Read(bytes.NewBuffer(inputRaw[:]), binary.LittleEndian, &input)
 
@@ -132,7 +135,10 @@ func inflate(inputRaw []byte, outputSize uint32) (image.Image, error) {
 
 	log.Printf("anOutputSize: %v", anOutputSize)
 
-	result := state.inflateData(aFullFormat, anOutputSize)
+	result, err := state.inflateData(aFullFormat, anOutputSize)
+	if err != nil {
+		return nil, err
+	}
 
 	var colors *[]bgra
 	if formatFourCC == fccDXT1n {
@@ -172,7 +178,7 @@ func inflate(inputRaw []byte, outputSize uint32) (image.Image, error) {
 	return img, nil
 }
 
-func (state *inflaterState) inflateData(fullFormat fullFormat, outputSize uint32) []uint8 {
+func (state *inflaterState) inflateData(fullFormat fullFormat, outputSize uint32) ([]uint8, error) {
 	ioOutputTab := make([]uint8, outputSize)
 
 	state.head = 0
@@ -187,32 +193,62 @@ func (state *inflaterState) inflateData(fullFormat fullFormat, outputSize uint32
 	aCompressionFlags := state.readBits(32)
 	state.dropBits(32)
 
-	aColorBitmap := make([]bool, fullFormat.nbObPixelBlocks)
-	// aAlphaBitmap := make([]bool, fullFormat.nbObPixelBlocks)
+	state.colorBitmap = make([]bool, fullFormat.nbObPixelBlocks)
+	state.alphaBitmap = make([]bool, fullFormat.nbObPixelBlocks)
 
 	log.Printf("aDataSize: %v, aCompressionFlags: %032b", aDataSize, aCompressionFlags)
 
 	if aCompressionFlags&cfDecodeWhiteColor != 0 {
 		log.Printf("cfDecodeWhiteColor")
+		return nil, fmt.Errorf("cfDecodeWhiteColor not implemented")
 	}
 	if aCompressionFlags&cfDecodeConstantAlphaFrom4Bits != 0 {
 		log.Printf("cfDecodeConstantAlphaFrom4Bits")
+		return nil, fmt.Errorf("cfDecodeConstantAlphaFrom4Bits not implemented")
 	}
 	if aCompressionFlags&cfDecodeConstantAlphaFrom8Bits != 0 {
 		log.Printf("cfDecodeConstantAlphaFrom8Bits")
+		return nil, fmt.Errorf("cfDecodeConstantAlphaFrom8Bits not implemented")
 		// state.decodeConstantAlphaFrom8Bits(&aAlphaBitmap, fullFormat, &ioOutputTab)
 	}
 	if aCompressionFlags&cfDecodePlainColor != 0 {
 		log.Printf("cfDecodePlainColor")
+		return nil, fmt.Errorf("cfDecodePlainColor not implemented")
 	}
 
-	var i uint32
 	if state.bits >= 32 {
 		state.inputPos--
 	}
 
+	if err := state.processAlpha(&ioOutputTab, fullFormat); err != nil {
+		return nil, err
+	}
+
+	if err := state.processColor(&ioOutputTab, fullFormat); err != nil {
+		return nil, err
+	}
+
+	// var i uint32
+	// size := uint32(len(ioOutputTab))
+	// for i = 0; i < size; i++ {
+	// 	fmt.Printf("%02X", ioOutputTab[i])
+	// 	if (i+1)%uint32(fullFormat.width) == 0 {
+	// 		fmt.Printf("\n")
+	// 	}
+	// }
+	// fmt.Printf("\n")
+
+	return ioOutputTab, nil
+}
+
+func (state *inflaterState) processAlpha(ptr *[]uint8, fullFormat fullFormat) error {
+	// ioOutputTab := *ptr
+
 	if ((fullFormat.flags&ffAlpha) != 0 && (fullFormat.flags&ffDeducedAlphaComp) == 0) || (fullFormat.flags&ffBiColorComp) != 0 {
 		log.Printf("LOOP1")
+		return fmt.Errorf("Alpha Loop not implemented for %+v", fullFormat)
+
+		// var i uint32
 
 		// if (((iFullFormat.format.flags & FF_ALPHA) && !(iFullFormat.format.flags & FF_DEDUCEDALPHACOMP)) || iFullFormat.format.flags & FF_BICOLORCOMP) {
 
@@ -231,11 +267,19 @@ func (state *inflaterState) inflateData(fullFormat fullFormat, outputSize uint32
 		// }
 	}
 
+	return nil
+}
+
+func (state *inflaterState) processColor(ptr *[]uint8, fullFormat fullFormat) error {
+	ioOutputTab := *ptr
+
 	if (fullFormat.flags&ffColor) != 0 || (fullFormat.flags&ffBiColorComp) != 0 {
-		aColorSize := uint32(len(aColorBitmap))
-		log.Printf("LOOP2 %v %v", aColorSize, state.inputSize)
+		aColorSize := uint32(len(state.colorBitmap))
+		log.Printf("LOOP2 %v %v %v", aColorSize, state.inputPos, state.inputSize)
+
+		var i uint32
 		for i = 0; i < aColorSize && state.inputPos < state.inputSize; i++ {
-			if !aColorBitmap[i] {
+			if !state.colorBitmap[i] {
 				offset := fullFormat.bytesPerPixelBlock * i
 				if fullFormat.hasTwoComponents {
 					offset += fullFormat.bytesPerComponent
@@ -255,47 +299,37 @@ func (state *inflaterState) inflateData(fullFormat fullFormat, outputSize uint32
 		}
 
 		if fullFormat.bytesPerComponent > 4 {
-			// log.Printf("LOOP3")
-
-			// for (aLoopIndex = 0; aLoopIndex < aColorBitmap.size() && iState.inputPos < iState.inputSize; ++aLoopIndex) {
-			// 	if (!aColorBitmap[aLoopIndex]) {
-			// 		uint32_t aOffset = iFullFormat.bytesPerPixelBlock * aLoopIndex + 4 + (iFullFormat.hasTwoComponents ? iFullFormat.bytesPerComponent : 0);
-			// 		(*reinterpret_cast<uint32_t*>(&(ioOutputTab[aOffset]))) = iState.input[iState.inputPos];
-			// 		++iState.inputPos;
-			// 	}
-			// }
-			for i = 0; i < aColorSize && state.inputPos < state.inputSize; i++ {
-				if !aColorBitmap[i] {
-					offset := fullFormat.bytesPerPixelBlock*i + 4
-
-					if fullFormat.hasTwoComponents {
-						offset += fullFormat.bytesPerComponent
-					}
-
-					data := state.input[state.inputPos]
-					// fmt.Printf("%08X\n", data)
-
-					ioOutputTab[offset+0] = uint8((data >> 0) & 0xFF)
-					ioOutputTab[offset+1] = uint8((data >> 8) & 0xFF)
-					ioOutputTab[offset+2] = uint8((data >> 16) & 0xFF)
-					ioOutputTab[offset+3] = uint8((data >> 24) & 0xFF)
-
-					state.inputPos++
-				}
-			}
+			state.processColorMultiByte(ptr, fullFormat)
 		}
 	}
 
-	// size := uint32(len(ioOutputTab))
-	// for i = 0; i < size; i++ {
-	// 	fmt.Printf("%02X", ioOutputTab[i])
-	// 	if (i+1)%uint32(fullFormat.width) == 0 {
-	// 		fmt.Printf("\n")
-	// 	}
-	// }
-	// fmt.Printf("\n")
+	return nil
+}
 
-	return ioOutputTab
+func (state *inflaterState) processColorMultiByte(ptr *[]uint8, fullFormat fullFormat) {
+	ioOutputTab := *ptr
+	aColorSize := uint32(len(state.colorBitmap))
+
+	var i uint32
+	for i = 0; i < aColorSize && state.inputPos < state.inputSize; i++ {
+		if !state.colorBitmap[i] {
+			offset := fullFormat.bytesPerPixelBlock*i + 4
+
+			if fullFormat.hasTwoComponents {
+				offset += fullFormat.bytesPerComponent
+			}
+
+			data := state.input[state.inputPos]
+			// fmt.Printf("%08X\n", data)
+
+			ioOutputTab[offset+0] = uint8((data >> 0) & 0xFF)
+			ioOutputTab[offset+1] = uint8((data >> 8) & 0xFF)
+			ioOutputTab[offset+2] = uint8((data >> 16) & 0xFF)
+			ioOutputTab[offset+3] = uint8((data >> 24) & 0xFF)
+
+			state.inputPos++
+		}
+	}
 }
 
 func (state *inflaterState) decodeConstantAlphaFrom8Bits(aAlphaBitmap *[]bool, fullFormat fullFormat, result *[]uint8) {
@@ -360,7 +394,7 @@ func processDXT1Block(pixelsPtr *[]bgra, block *DXT1Block, blockX uint16, blockY
 	var y uint16
 	var x uint16
 	for y = 0; y < 4; y++ {
-		curPixel := uint(blockY+y)*uint(width) + uint(blockX) // TODO test if correct
+		curPixel := uint(blockY+y)*uint(width) + uint(blockX)
 
 		for x = 0; x < 4; x++ {
 			pixel := pixels[curPixel]

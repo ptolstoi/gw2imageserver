@@ -10,6 +10,10 @@ import (
 	"github.com/julienschmidt/httprouter"
 )
 
+var (
+	contentType = "content-type"
+)
+
 func (app *app) initHTTP() {
 	app.httpRouter = httprouter.New()
 	app.httpRouter.GET("/v1/image/:file", app.serveFile)
@@ -62,9 +66,9 @@ func (app *app) serveFile(w http.ResponseWriter, r *http.Request, ps httprouter.
 	log.Printf("file found: %v %v %v", file.file, file.fileType, file.lastModified)
 
 	if file.fileType == "png" {
-		headers.Set("content-type", "image/png")
+		headers.Set(contentType, "image/png")
 	} else {
-		headers.Set("content-type", "text/plain")
+		headers.Set(contentType, "text/plain")
 	}
 
 	w.Write(file.content)

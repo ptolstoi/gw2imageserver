@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"image"
 	"image/png"
 	"io/ioutil"
 	"log"
@@ -108,7 +109,7 @@ func (app *app) noFileInCache(fileID string, fileType string) (*file, error) {
 
 	log.Printf("width: %v, height: %v, format: %v, numBlocks: %v", width, height, format, numBlocks)
 
-	imgRaw, err := inflate(data, numBlocks)
+	imgRaw, err := inflate(data)
 
 	if err != nil {
 		return nil, err
@@ -121,23 +122,7 @@ func (app *app) noFileInCache(fileID string, fileType string) (*file, error) {
 	}
 
 	if fileType == "png" {
-		buffer := new(bytes.Buffer)
-
-		if err := png.Encode(buffer, imgRaw); err != nil {
-			return nil, err
-		}
-
-		newFile := file{
-			content:  buffer.Bytes(),
-			file:     fileID,
-			fileType: fileType,
-		}
-
-		if err := app.saveFileToCache(&newFile); err != nil {
-			return nil, err
-		}
-
-		return &newFile, nil
+		return app.saveFileAsPNG(fileID, &imgRaw)
 	}
 
 	return nil, fmt.Errorf("unknown file type")
@@ -161,4 +146,24 @@ func checkHeader(data []byte) error {
 	}
 
 	return nil
+}
+
+func (app *app) saveFileAsPNG(fileID string, imgRaw *image.Image) (*file, error) {
+	buffer := new(bytes.Buffer)
+
+	if err := png.Encode(buffer, *imgRaw); err != nil {
+		return nil, err
+	}
+
+	newFile := file{
+		content:  buffer.Bytes(),
+		file:     fileID,
+		fileType: "png",
+	}
+
+	if err := app.saveFileToCache(&newFile); err != nil {
+		return nil, err
+	}
+
+	return &newFile, nil
 }
