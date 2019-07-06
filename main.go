@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 
@@ -17,7 +16,7 @@ func main() {
 
 	app.start()
 
-	_, _ = http.Get("http://localhost:7089/v1/image/66955.png?noCache")
+	// _, _ = http.Get("http://localhost:7089/v1/image/66955.png?noCache")
 
 	stopChannel := make(chan os.Signal, 1)
 	signal.Notify(stopChannel, os.Interrupt)

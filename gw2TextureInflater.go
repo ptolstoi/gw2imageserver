@@ -50,12 +50,6 @@ type bgra struct {
 	a uint8
 }
 
-type dxt1Block struct {
-	Color1  uint16
-	Color2  uint16
-	Indices uint32
-}
-
 const (
 	ffColor            uint16 = 0x10
 	ffAlpha            uint16 = 0x20
@@ -168,9 +162,20 @@ func inflate(inputRaw []byte, origWidth uint16, origHeight uint16) (image.Image,
 		// log.Printf("colors: %v", len(*colors))
 	} else if formatFourCC == fccDXT5n {
 		// log.Printf("fccDXT5")
-		return nil, fmt.Errorf("fccDXT5 not implemented yet")
+
+		var err error
+		colors, err = processDXT5(&result, aFullFormat.width, aFullFormat.height)
+		if err != nil {
+			return nil, err
+		}
 	} else {
-		return nil, fmt.Errorf("unknown formatFourCC: %08X", formatFourCC)
+		f := formatFourCC
+		c := func(a uint32) string {
+			return string(a)
+		}
+		return nil, fmt.Errorf("unknown formatFourCC: 0x%08X (%v%v%v%v)", formatFourCC,
+			c((f>>0)&0xFF), c((f>>8)&0xFF), c((f>>16)&0xFF), c((f>>24)&0xFF),
+		)
 	}
 
 	img := image.NewRGBA(image.Rect(0, 0, int(origWidth), int(origHeight)))
@@ -214,7 +219,7 @@ func (state *inflaterState) inflateData(fullFormat fullFormat, outputSize uint32
 	// log.Printf("aDataSize: %v, aCompressionFlags: %032b", aDataSize, aCompressionFlags)
 
 	if aCompressionFlags&cfDecodeWhiteColor != 0 {
-		// log.Printf("cfDecodeWhiteColor")
+		log.Printf("cfDecodeWhiteColor")
 		// return nil, fmt.Errorf("cfDecodeWhiteColor not implemented")
 		if err := state.decodeWhiteColor(&ioOutputTab, fullFormat); err != nil {
 			return nil, err
@@ -225,14 +230,14 @@ func (state *inflaterState) inflateData(fullFormat fullFormat, outputSize uint32
 		return nil, fmt.Errorf("cfDecodeConstantAlphaFrom4Bits not implemented")
 	}
 	if aCompressionFlags&cfDecodeConstantAlphaFrom8Bits != 0 {
-		// log.Printf("cfDecodeConstantAlphaFrom8Bits")
+		log.Printf("cfDecodeConstantAlphaFrom8Bits")
 		// return nil, fmt.Errorf("cfDecodeConstantAlphaFrom8Bits not implemented")
 		if err := state.decodeConstantAlphaFrom8Bits(&ioOutputTab, fullFormat); err != nil {
 			return nil, err
 		}
 	}
 	if aCompressionFlags&cfDecodePlainColor != 0 {
-		// log.Printf("cfDecodePlainColor")
+		log.Printf("cfDecodePlainColor")
 		// return nil, fmt.Errorf("cfDecodePlainColor not implemented")
 		if err := state.decodePlainColor(&ioOutputTab, fullFormat); err != nil {
 			return nil, err
@@ -716,82 +721,13 @@ func (state *inflaterState) processColorMultiByte(ptr *[]uint8, fullFormat fullF
 	}
 }
 
-func processDXT1(data *[]uint8, width uint16, height uint16) (*[]bgra, error) {
-	numPixels := uint32(width) * uint32(height)
-
-	// log.Printf("processDXT1: %v * %v = %v\n", width, height, numPixels)
-
-	blocks := make([]dxt1Block, len(*data)/8)
-
-	reader := bytes.NewBuffer(*data)
-	if err := binary.Read(reader, binary.LittleEndian, &blocks); err != nil {
-		return nil, err
-	}
-
-	pixels := make([]bgra, numPixels)
-
-	numHorizBlocks := width >> 2
-	numVertBlocks := height >> 2
-
-	// log.Printf("processDXT1: %v %v", numHorizBlocks, numVertBlocks)
-
-	var y uint16
-	var x uint16
-
-	for y = 0; y < numVertBlocks; y++ {
-		for x = 0; x < numHorizBlocks; x++ {
-			block := blocks[y*numHorizBlocks+x]
-
-			processDXT1Block(&pixels, &block, x*4, y*4, width)
-		}
-	}
-
-	// for y = 0; y < height; y++ {
-	// 	for x = 0; x < width; x++ {
-	// 		fmt.Printf("%+v ", pixels[y*width+x])
-	// 	}
-	// 	fmt.Printf("\n")
-	// }
-
-	return &pixels, nil
-}
-
-func processDXT1Block(pixelsPtr *[]bgra, block *dxt1Block, blockX uint16, blockY uint16, width uint16) {
-	pixels := *pixelsPtr
-	indices := block.Indices
-	var colors [4]bgra
-
-	processDXTColor(&colors, block, true)
-
-	var y uint16
-	var x uint16
-	for y = 0; y < 4; y++ {
-		curPixel := uint(blockY+y)*uint(width) + uint(blockX)
-
-		for x = 0; x < 4; x++ {
-			pixel := pixels[curPixel]
-			index := indices & 3
-
-			pixel.r = colors[index].r
-			pixel.g = colors[index].g
-			pixel.b = colors[index].b
-			pixel.a = colors[index].a
-
-			pixels[curPixel] = pixel
-
-			curPixel++
-			indices >>= 2
-		}
-	}
-}
-
-func processDXTColor(pixel *[4]bgra, block *dxt1Block, isDXT1 bool) {
-	red1 := (block.Color1 & 0xF800) >> 11
-	green1 := (block.Color1 & 0x07E0) >> 5
-	blue1 := (block.Color1 & 0x001F)
-	red2 := (block.Color2 & 0xF800) >> 11
-	green2 := (block.Color2 & 0x07E0) >> 5
-	blue2 := (block.Color2 & 0x001F)
+func processDXTColor(pixel *[4]bgra, block *dxtColor, setAlpha bool, isDXT1 bool) {
+	red1 := uint8((block.color1 & 0xF800) >> 11)
+	green1 := uint8((block.color1 & 0x07E0) >> 5)
+	blue1 := uint8((block.color1 & 0x001F))
+	red2 := uint8((block.color2 & 0xF800) >> 11)
+	green2 := uint8((block.color2 & 0x07E0) >> 5)
+	blue2 := uint8((block.color2 & 0x001F))
 
 	pixel[0].r = uint8((red1 << 3) | (red1 >> 2))
 	pixel[0].g = uint8((green1 << 2) | (green1 >> 4))
@@ -801,7 +737,7 @@ func processDXTColor(pixel *[4]bgra, block *dxt1Block, isDXT1 bool) {
 	pixel[1].g = uint8((green2 << 2) | (green2 >> 4))
 	pixel[1].b = uint8((blue2 << 3) | (blue2 >> 2))
 
-	if !isDXT1 || block.Color1 > block.Color2 {
+	if !isDXT1 || block.color1 > block.color2 {
 		pixel[2].r = uint8((uint16(pixel[0].r)*2 + uint16(pixel[1].r)) / 3)
 		pixel[2].g = uint8((uint16(pixel[0].g)*2 + uint16(pixel[1].g)) / 3)
 		pixel[2].b = uint8((uint16(pixel[0].b)*2 + uint16(pixel[1].b)) / 3)
@@ -809,7 +745,8 @@ func processDXTColor(pixel *[4]bgra, block *dxt1Block, isDXT1 bool) {
 		pixel[3].r = uint8((uint16(pixel[0].r) + uint16(pixel[1].r)*2) / 3)
 		pixel[3].g = uint8((uint16(pixel[0].g) + uint16(pixel[1].g)*2) / 3)
 		pixel[3].b = uint8((uint16(pixel[0].b) + uint16(pixel[1].b)*2) / 3)
-		if isDXT1 {
+
+		if setAlpha {
 			pixel[0].a = 0xFF
 			pixel[1].a = 0xFF
 			pixel[2].a = 0xFF
@@ -824,7 +761,7 @@ func processDXTColor(pixel *[4]bgra, block *dxt1Block, isDXT1 bool) {
 		pixel[3].g = 0
 		pixel[3].b = 0
 
-		if isDXT1 {
+		if setAlpha {
 			pixel[0].a = 0x00
 			pixel[1].a = 0x00
 			pixel[2].a = 0x00
