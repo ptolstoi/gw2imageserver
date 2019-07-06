@@ -20,14 +20,13 @@ func (app *app) initHTTP() {
 }
 
 func (app *app) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	log.Printf("%v %v", req.Method, req.URL)
+	log.Printf("[ServeHTTP] %v %v", req.Method, req.URL)
 
 	app.httpRouter.ServeHTTP(w, req)
 }
 
 func (app *app) serveFile(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 	noCache := len(r.URL.Query()["noCache"]) != 0
-	log.Printf("nocache: %v", noCache)
 
 	parts := strings.SplitN(ps.ByName("file"), ".", 2)
 	extension := "png"
@@ -46,11 +45,15 @@ func (app *app) serveFile(w http.ResponseWriter, r *http.Request, ps httprouter.
 	}
 
 	if err != nil {
+		errorFromCache := fmt.Sprintf("error during lookup of file %v: %v", fileToServe, err)
+
+		log.Printf("[serveFile] ERROR: %v", errorFromCache)
+
 		w.WriteHeader(500)
 		json.NewEncoder(w).Encode(struct {
 			Error string `json:"error"`
 		}{
-			Error: fmt.Sprintf("error during lookup of file %v: %v", fileToServe, err),
+			Error: errorFromCache,
 		})
 		return
 	} else if file == nil {
@@ -63,7 +66,7 @@ func (app *app) serveFile(w http.ResponseWriter, r *http.Request, ps httprouter.
 		return
 	}
 
-	log.Printf("file found: %v %v %v", file.file, file.fileType, file.lastModified)
+	log.Printf("[serveFile] file found: %v %v %v", file.file, file.fileType, file.lastModified)
 
 	if file.fileType == "png" {
 		headers.Set(contentType, "image/png")

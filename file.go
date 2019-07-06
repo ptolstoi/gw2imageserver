@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"time"
 )
 
@@ -44,12 +45,21 @@ func (app *app) fetchFile(fileID string) (*file, error) {
 	// https://render.guildwars2.com/file/BFD2CB5A0604A4425DF9CD22DF0F40C4E0AE9AAA/602790.jpg
 	// https://render.guildwars2.com/file/BFD2CB5A0604A4425DF9CD22DF0F40C4E0AE9AAA/602790.png
 	// http://assetcdn.101.arenanetworks.com/program/101/1/0/602790
-
-	url := fmt.Sprintf("http://assetcdn.101.arenanetworks.com/program/101/1/0/%v", fileID)
+	// authCookie=access=/latest/*!/manifest/program/*!/program/*~md5=4e51ad868f87201ad93e428ff30c6691
+	url := fmt.Sprintf("http://assetcdn.101.ArenaNetworks.com/program/101/1/0/%v", fileID)
 
 	log.Printf("[fetchFile] fetching %v", url)
 
-	response, err := app.httpClient.Get(url)
+	request, err := http.NewRequest("GET", url, nil)
+	request.AddCookie(&http.Cookie{
+		Name:  "authCookie",
+		Value: "access=/latest/*!/manifest/program/*!/program/*~md5=4e51ad868f87201ad93e428ff30c6691",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	response, err := app.httpClient.Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -106,18 +116,12 @@ func (app *app) noFileInCache(fileID string, fileType string) (*file, error) {
 		return nil, fmt.Errorf("unknown ATEX texture format: %v", format)
 	}
 
-	log.Printf("width: %v, height: %v, format: %v, numBlocks: %v", width, height, format, numBlocks)
+	// log.Printf("width: %v, height: %v, format: %v, numBlocks: %v", width, height, format, numBlocks)
 
-	imgRaw, err := inflate(data)
+	imgRaw, err := inflate(data, width, height)
 
 	if err != nil {
 		return nil, err
-	}
-
-	if imgRaw != nil {
-		log.Printf("after inflate: %v", imgRaw.Bounds())
-	} else {
-		log.Printf("after inflate: nil!")
 	}
 
 	if fileType == "png" {
