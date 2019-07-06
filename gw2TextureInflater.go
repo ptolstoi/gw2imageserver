@@ -20,8 +20,10 @@ type inflaterState struct {
 
 	isEmpty bool
 
-	colorBitmap []bool
+	colorBitMap []bool
 	alphaBitmap []bool
+
+	huffmanTree huffmanTree
 }
 
 type format struct {
@@ -48,7 +50,7 @@ type bgra struct {
 	a uint8
 }
 
-type DXT1Block struct {
+type dxt1Block struct {
 	Color1  uint16
 	Color2  uint16
 	Indices uint32
@@ -69,13 +71,12 @@ const (
 	cfDecodePlainColor             = 0x08
 )
 
-func inflate(inputRaw []byte) (image.Image, error) {
-	input := make([]uint32, len(inputRaw)/4)
-	binary.Read(bytes.NewBuffer(inputRaw[:]), binary.LittleEndian, &input)
+func newInflaterState(input *[]uint32) *inflaterState {
+	tree := newHuffmanTree()
 
 	state := inflaterState{
-		input:     input,
-		inputSize: uint32(len(input)),
+		input:     *input,
+		inputSize: uint32(len(*input)),
 		inputPos:  0,
 
 		head:   0,
@@ -83,7 +84,17 @@ func inflate(inputRaw []byte) (image.Image, error) {
 		buffer: 0,
 
 		isEmpty: false,
+
+		huffmanTree: *tree,
 	}
+	return &state
+}
+
+func inflate(inputRaw []byte) (image.Image, error) {
+	input := make([]uint32, len(inputRaw)/4)
+	binary.Read(bytes.NewBuffer(inputRaw[:]), binary.LittleEndian, &input)
+
+	state := newInflaterState(&input)
 
 	// skip header
 	log.Printf("skipping header")
@@ -193,7 +204,7 @@ func (state *inflaterState) inflateData(fullFormat fullFormat, outputSize uint32
 	aCompressionFlags := state.readBits(32)
 	state.dropBits(32)
 
-	state.colorBitmap = make([]bool, fullFormat.nbObPixelBlocks)
+	state.colorBitMap = make([]bool, fullFormat.nbObPixelBlocks)
 	state.alphaBitmap = make([]bool, fullFormat.nbObPixelBlocks)
 
 	log.Printf("aDataSize: %v, aCompressionFlags: %032b", aDataSize, aCompressionFlags)
@@ -213,7 +224,10 @@ func (state *inflaterState) inflateData(fullFormat fullFormat, outputSize uint32
 	}
 	if aCompressionFlags&cfDecodePlainColor != 0 {
 		log.Printf("cfDecodePlainColor")
-		return nil, fmt.Errorf("cfDecodePlainColor not implemented")
+		// return nil, fmt.Errorf("cfDecodePlainColor not implemented")
+		if err := state.decodePlainColor(&ioOutputTab, fullFormat); err != nil {
+			return nil, err
+		}
 	}
 
 	if state.bits >= 32 {
@@ -239,6 +253,244 @@ func (state *inflaterState) inflateData(fullFormat fullFormat, outputSize uint32
 	// fmt.Printf("\n")
 
 	return ioOutputTab, nil
+}
+
+func (state *inflaterState) decodePlainColor(ptr *[]uint8, fullFormat fullFormat) error {
+	if err := state.needBits(24); err != nil {
+		return err
+	}
+
+	aBlue := uint16(state.readBits(8))
+	if err := state.dropBits(8); err != nil {
+		return err
+	}
+	aGreen := uint16(state.readBits(8))
+	if err := state.dropBits(8); err != nil {
+		return err
+	}
+	aRed := uint16(state.readBits(8))
+	if err := state.dropBits(8); err != nil {
+		return err
+	}
+
+	log.Printf("[decodePlainColor] frst: b: %04X g: %04X r: %04X", aBlue, aGreen, aRed)
+
+	aRedTemp1 := uint8((aRed - (aRed >> 5)) >> 3)
+	aBlueTemp1 := uint8((aBlue - (aBlue >> 5)) >> 3)
+
+	aGreenTemp1 := uint16((aGreen - (aGreen >> 6)) >> 2)
+
+	log.Printf("[decodePlainColor] tmp1: b: %04X g: %04X r: %04X", aBlueTemp1, aGreenTemp1, aRedTemp1)
+
+	aRedTemp2 := uint8((aRedTemp1 << 3) + (aRedTemp1 >> 2))
+	aBlueTemp2 := uint8((aBlueTemp1 << 3) + (aBlueTemp1 >> 2))
+
+	aGreenTemp2 := uint8((aGreenTemp1 << 2) + (aGreenTemp1 >> 4))
+
+	log.Printf("[decodePlainColor] tmp2: b: %04X g: %04X r: %04X", aBlueTemp2, aGreenTemp2, aRedTemp2)
+
+	aRedFlg := uint32(0)
+	aBlueFlg := uint32(0)
+	aGreenFlg := uint32(0)
+
+	if aRedTemp1&0x11 == 0x11 {
+		aRedFlg = 1
+	}
+	if aBlueTemp1&0x11 == 0x11 {
+		aBlueFlg = 1
+	}
+	if aGreenTemp1&0x1111 == 0x1111 {
+		aGreenFlg = 1
+	}
+
+	aCompRed := 12 * (uint32(aRed) - uint32(aRedTemp2)) / (8 - aRedFlg)
+	aCompBlue := 12 * (uint32(aBlue) - uint32(aBlueTemp2)) / (8 - aBlueFlg)
+
+	aCompGreen := 12 * (uint32(aGreen) - uint32(aGreenTemp2)) / (8 - aGreenFlg)
+
+	log.Printf("[decodePlainColor] tmp2: b: %04X g: %04X r: %04X", aCompBlue, aCompGreen, aCompRed)
+
+	aValueRed1, aValueRed2 := magicValueSplit(aCompRed, uint32(aRedTemp1))
+	aValueBlue1, aValueBlue2 := magicValueSplit(aCompBlue, uint32(aBlueTemp1))
+	aValueGreen1, aValueGreen2 := magicValueSplit(aCompGreen, uint32(aGreenTemp1))
+
+	log.Printf("[decodePlainColor] red : 1: %04X 2: %04X", aValueRed1, aValueRed2)
+	log.Printf("[decodePlainColor] blue: 1: %04X 2: %04X", aValueBlue1, aValueBlue2)
+	log.Printf("[decodePlainColor] gren: 1: %04X 2: %04X", aValueGreen1, aValueGreen2)
+
+	aValueColor1 := uint32(aValueRed1) | ((aValueGreen1 | (aValueBlue1 << 6)) << 5)
+	aValueColor2 := uint32(aValueRed2) | ((aValueGreen2 | (aValueBlue2 << 6)) << 5)
+
+	log.Printf("[decodePlainColor] finl: 1: %04X 2: %04X", aValueColor1, aValueColor2)
+
+	var aTempValue1 uint32
+	var aTempValue2 uint32
+
+	aTempValue1, aTempValue2 = magicValueSplit2(
+		aTempValue1, aTempValue2,
+		aValueRed1, aValueRed2,
+		uint16(aRedTemp1), aCompRed,
+	)
+
+	log.Printf("[decodePlainColor] red : 1: %04X 2: %04X", aTempValue1, aTempValue2)
+
+	aTempValue1, aTempValue2 = magicValueSplit2(
+		aTempValue1, aTempValue2,
+		aValueBlue1, aValueBlue2,
+		uint16(aBlueTemp1), aCompBlue,
+	)
+
+	log.Printf("[decodePlainColor] blue: 1: %04X 2: %04X", aTempValue1, aTempValue2)
+
+	aTempValue1, aTempValue2 = magicValueSplit2(
+		aTempValue1, aTempValue2,
+		aValueGreen1, aValueGreen2,
+		uint16(aGreenTemp1), aCompGreen,
+	)
+
+	log.Printf("[decodePlainColor] gren: 1: %04X 2: %04X", aTempValue1, aTempValue2)
+
+	if aTempValue2 > 0 {
+		aTempValue1 = (aTempValue1 + (aTempValue2 / 2)) / aTempValue2
+	}
+
+	log.Printf("[decodePlainColor] temp: 1: %04X 2: %04X", aTempValue1, aTempValue2)
+
+	aDxt1SpecialCase := ((fullFormat.flags & ffDeducedAlphaComp) != 0) && (aTempValue1 == 5 || aTempValue1 == 6 || aTempValue2 != 0)
+
+	log.Printf("[decodePlainColor] aDxt1SpecialCase: %v", aDxt1SpecialCase)
+
+	if aTempValue2 > 0 && !aDxt1SpecialCase {
+		if aValueColor2 == 0xFFFF {
+			aTempValue1 = 12
+			aValueColor1--
+		} else {
+			aTempValue1 = 0
+			aValueColor2++
+		}
+	}
+
+	log.Printf("[decodePlainColor] sptl: 1: %04X 2: %04X", aTempValue1, aTempValue2)
+
+	if aValueColor2 >= aValueColor1 {
+		aValueColor1, aValueColor2 = aValueColor2, aValueColor1
+
+		aTempValue1 = 12 - aTempValue1
+	}
+
+	log.Printf("[decodePlainColor] sptl: 1: %04X 2: %04X", aTempValue1, aTempValue2)
+
+	var aColorChosen uint64
+
+	if aDxt1SpecialCase {
+		aColorChosen = 2
+	} else {
+		if aTempValue1 < 2 {
+			aColorChosen = 0
+		} else if aTempValue1 < 6 {
+			aColorChosen = 2
+		} else if aTempValue1 < 10 {
+			aColorChosen = 3
+		} else {
+			aColorChosen = 1
+		}
+	}
+
+	log.Printf("[decodePlainColor] chosen: %04X", aColorChosen)
+
+	aTempValue := (aColorChosen) | (aColorChosen << 2) | ((aColorChosen | (aColorChosen << 2)) << 4)
+	aTempValue = aTempValue | (aTempValue << 8)
+	aTempValue = aTempValue | (aTempValue << 16)
+
+	log.Printf("[decodePlainColor] aTempValue: %04X", aTempValue)
+
+	aFinalValue := uint64(aValueColor1) | uint64(aValueColor2<<16) | (uint64(aTempValue) << 32)
+
+	log.Printf("[decodePlainColor] aFinalValue: %04X", aFinalValue)
+
+	var aPixelBlockPos uint32
+
+	ioOutputTab := *ptr
+
+	for aPixelBlockPos < fullFormat.nbObPixelBlocks {
+		aCode, err := state.readCode()
+		if err != nil {
+			return err
+		}
+
+		if err := state.needBits(1); err != nil {
+			return err
+		}
+		aValue := state.readBits(1)
+		if err := state.dropBits(1); err != nil {
+			return err
+		}
+
+		log.Printf("%04x %04x %04x", aCode, aValue, aPixelBlockPos)
+
+		for aCode > 0 {
+			if !state.colorBitMap[aPixelBlockPos] {
+				if aValue != 0 {
+					offset := fullFormat.bytesPerPixelBlock * aPixelBlockPos
+					if fullFormat.hasTwoComponents {
+						offset += fullFormat.bytesPerComponent
+					}
+
+					var i uint32
+					for i = 0; i < fullFormat.bytesPerComponent; i++ {
+						ioOutputTab[offset+i] = uint8((aFinalValue >> (8 * i)) & 0xFF)
+					}
+
+					state.colorBitMap[aPixelBlockPos] = true
+				}
+				aCode--
+			}
+			aPixelBlockPos++
+		}
+
+		for aPixelBlockPos < fullFormat.nbObPixelBlocks && state.colorBitMap[aPixelBlockPos] {
+			aPixelBlockPos++
+		}
+	}
+
+	return nil
+}
+
+func magicValueSplit(aComp uint32, aTemp1 uint32) (uint32, uint32) {
+	var aValue1 uint32
+	var aValue2 uint32
+
+	if aComp < 2 {
+		aValue1 = aTemp1
+		aValue2 = aTemp1
+	} else if aComp < 6 {
+		aValue1 = aTemp1
+		aValue2 = aTemp1 + 1
+	} else if aComp < 10 {
+		aValue1 = aTemp1 + 1
+		aValue2 = aTemp1
+	} else {
+		aValue1 = aTemp1 + 1
+		aValue2 = aTemp1 + 1
+	}
+
+	return aValue1, aValue2
+}
+
+func magicValueSplit2(
+	aTempValue1 uint32, aTempValue2 uint32,
+	aValueRed1 uint32, aValueRed2 uint32,
+	aRedTemp1 uint16, aCompRed uint32) (uint32, uint32) {
+	if aValueRed1 != aValueRed2 {
+		if aValueRed1 == uint32(aRedTemp1) {
+			aTempValue1 += aCompRed
+		} else {
+			aTempValue1 += 12 - aCompRed
+		}
+		aTempValue2++
+	}
+
+	return aTempValue1, aTempValue2
 }
 
 func (state *inflaterState) processAlpha(ptr *[]uint8, fullFormat fullFormat) error {
@@ -274,12 +526,12 @@ func (state *inflaterState) processColor(ptr *[]uint8, fullFormat fullFormat) er
 	ioOutputTab := *ptr
 
 	if (fullFormat.flags&ffColor) != 0 || (fullFormat.flags&ffBiColorComp) != 0 {
-		aColorSize := uint32(len(state.colorBitmap))
+		aColorSize := uint32(len(state.colorBitMap))
 		log.Printf("LOOP2 %v %v %v", aColorSize, state.inputPos, state.inputSize)
 
 		var i uint32
 		for i = 0; i < aColorSize && state.inputPos < state.inputSize; i++ {
-			if !state.colorBitmap[i] {
+			if !state.colorBitMap[i] {
 				offset := fullFormat.bytesPerPixelBlock * i
 				if fullFormat.hasTwoComponents {
 					offset += fullFormat.bytesPerComponent
@@ -308,11 +560,11 @@ func (state *inflaterState) processColor(ptr *[]uint8, fullFormat fullFormat) er
 
 func (state *inflaterState) processColorMultiByte(ptr *[]uint8, fullFormat fullFormat) {
 	ioOutputTab := *ptr
-	aColorSize := uint32(len(state.colorBitmap))
+	aColorSize := uint32(len(state.colorBitMap))
 
 	var i uint32
 	for i = 0; i < aColorSize && state.inputPos < state.inputSize; i++ {
-		if !state.colorBitmap[i] {
+		if !state.colorBitMap[i] {
 			offset := fullFormat.bytesPerPixelBlock*i + 4
 
 			if fullFormat.hasTwoComponents {
@@ -351,7 +603,7 @@ func processDXT1(data *[]uint8, width uint16, height uint16) (*[]bgra, error) {
 
 	numPixels := width * height
 
-	blocks := make([]DXT1Block, len(*data)/8)
+	blocks := make([]dxt1Block, len(*data)/8)
 
 	reader := bytes.NewBuffer(*data)
 	if err := binary.Read(reader, binary.LittleEndian, &blocks); err != nil {
@@ -384,7 +636,7 @@ func processDXT1(data *[]uint8, width uint16, height uint16) (*[]bgra, error) {
 	return &pixels, nil
 }
 
-func processDXT1Block(pixelsPtr *[]bgra, block *DXT1Block, blockX uint16, blockY uint16, width uint16) {
+func processDXT1Block(pixelsPtr *[]bgra, block *dxt1Block, blockX uint16, blockY uint16, width uint16) {
 	pixels := *pixelsPtr
 	indices := block.Indices
 	var colors [4]bgra
@@ -413,7 +665,7 @@ func processDXT1Block(pixelsPtr *[]bgra, block *DXT1Block, blockX uint16, blockY
 	}
 }
 
-func processDXTColor(pixel *[4]bgra, block *DXT1Block, isDXT1 bool) {
+func processDXTColor(pixel *[4]bgra, block *dxt1Block, isDXT1 bool) {
 	red1 := (block.Color1 & 0xF800) >> 11
 	green1 := (block.Color1 & 0x07E0) >> 5
 	blue1 := (block.Color1 & 0x001F)
@@ -544,6 +796,39 @@ func (state *inflaterState) dropBits(bits uint8) error {
 
 func (state *inflaterState) readBits(bits uint8) uint32 {
 	return state.head >> (32 - bits)
+}
+
+func (state *inflaterState) readCode() (ioCode uint16, err error) {
+	if state.huffmanTree.isEmpty {
+		return 0, fmt.Errorf("huffmanTree not initialized")
+	}
+
+	if err := state.needBits(32); err != nil {
+		return 0, err
+	}
+
+	symbol := state.readBits(uint8(maxNbBitsHash))
+
+	if state.huffmanTree.symbolValueHashTab[symbol] != 0xFFFF {
+		ioCode = uint16(state.huffmanTree.symbolValueHashTab[symbol])
+		bitsToDrop := state.huffmanTree.codeBitsHashTab[symbol]
+		state.dropBits(bitsToDrop)
+	} else {
+		var anIndex uint16
+		tmp := state.readBits(32)
+		for tmp < state.huffmanTree.codeCompTab[anIndex] {
+			anIndex++
+		}
+
+		aNbBits := state.huffmanTree.codeBitsTab[anIndex]
+		symbol = uint32(state.huffmanTree.symbolValueTabOffsetTab[anIndex]) -
+			((tmp - state.huffmanTree.codeCompTab[anIndex]) >> (32 - aNbBits))
+
+		ioCode = state.huffmanTree.symbolValueTab[symbol]
+		state.dropBits(aNbBits)
+	}
+
+	return
 }
 
 func deductFormat(fourcc string) format {

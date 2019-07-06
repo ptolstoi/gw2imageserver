@@ -31,6 +31,21 @@ func (app *app) initDB() {
 		log.Fatal(err)
 	}
 
+	_, err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS 
+			raw_file_fileType
+		ON 
+			raw
+		(
+			file,
+			fileType
+		)
+	`)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	app.db = db
 }
 

@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"image"
 	"image/png"
@@ -88,7 +87,7 @@ func (app *app) noFileInCache(fileID string, fileType string) (*file, error) {
 	data := uncompressedFile.content
 
 	log.Printf("[noFileInCache] file found: file=%v type=%v length=%v lastModified=%v", uncompressedFile.file, uncompressedFile.fileType, len(uncompressedFile.content), uncompressedFile.lastModified)
-	log.Printf("\n%s", hex.Dump(data[0:(16*10)]))
+	// log.Printf("\n%s", hex.Dump(data[0:(16*10)]))
 
 	if err := checkHeader(data); err != nil {
 		return nil, err
@@ -156,9 +155,10 @@ func (app *app) saveFileAsPNG(fileID string, imgRaw *image.Image) (*file, error)
 	}
 
 	newFile := file{
-		content:  buffer.Bytes(),
-		file:     fileID,
-		fileType: "png",
+		content:      buffer.Bytes(),
+		file:         fileID,
+		lastModified: time.Now().UTC(),
+		fileType:     "png",
 	}
 
 	if err := app.saveFileToCache(&newFile); err != nil {
