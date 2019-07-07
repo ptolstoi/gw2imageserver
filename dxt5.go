@@ -6,8 +6,7 @@ import (
 )
 
 type dxt3Block struct {
-	Alpha1  uint32
-	Alpha2  uint32
+	Alpha   uint64
 	Color1  uint16
 	Color2  uint16
 	Indices uint32
@@ -16,7 +15,14 @@ type dxt3Block struct {
 func processDXT5(data *[]uint8, width uint16, height uint16) (*[]bgra, error) {
 	numPixels := uint32(width) * uint32(height)
 
-	// log.Printf("processDXT3: %v * %v = %v\n", width, height, numPixels)
+	//for j, i := range *data {
+	//	fmt.Printf("%x ", i)
+	//	if (j+1)%4 == 0 {
+	//		fmt.Printf("\n")
+	//	}
+	//}
+
+	//log.Printf("processDXT5: %v * %v = %v\n", width, height, numPixels)
 
 	blocks := make([]dxt3Block, len(*data)/16)
 
@@ -25,12 +31,16 @@ func processDXT5(data *[]uint8, width uint16, height uint16) (*[]bgra, error) {
 		return nil, err
 	}
 
+	//for _, x := range blocks {
+	//	fmt.Printf("%08x %08x %016x\n", (x.Alpha >> 32) & 0xFFFFFFFF, x.Alpha & 0xFFFFFFFF, x.Alpha)
+	//}
+
 	pixels := make([]bgra, numPixels)
 
 	numHorizBlocks := width >> 2
 	numVertBlocks := height >> 2
 
-	// log.Printf("processDXT3: %v %v", numHorizBlocks, numVertBlocks)
+	//log.Printf("processDXT5: %v %v", numHorizBlocks, numVertBlocks)
 
 	var y uint16
 	var x uint16
@@ -56,7 +66,7 @@ func processDXT5(data *[]uint8, width uint16, height uint16) (*[]bgra, error) {
 func processDXT5Block(pixelsPtr *[]bgra, dxt3Block *dxt3Block, blockX uint16, blockY uint16, width uint16) {
 	pixels := *pixelsPtr
 	indices := dxt3Block.Indices
-	blockAlpha := uint64(dxt3Block.Alpha2)<<32 | uint64(dxt3Block.Alpha1)
+	blockAlpha := dxt3Block.Alpha
 
 	var colors [4]bgra
 	var alphas [8]uint8
@@ -67,8 +77,15 @@ func processDXT5Block(pixelsPtr *[]bgra, dxt3Block *dxt3Block, blockX uint16, bl
 	}
 
 	processDXTColor(&colors, &block, false, false)
+	//fmt.Printf("%04x %04x | ", block.color1, block.color2)
+	//for _, i := range colors {
+	//	fmt.Printf("%02x%02x%02x ", i.r, i.g, i.b)
+	//}
+	//fmt.Printf("\n")
 
-	alphas[0] = uint8(blockAlpha & 0xFF)
+	//fmt.Printf("%016x ", blockAlpha)
+
+	alphas[0] = uint8((blockAlpha >> 0) & 0xFF)
 	alphas[1] = uint8((blockAlpha >> 8) & 0xFF)
 	blockAlpha >>= 16
 
@@ -94,10 +111,10 @@ func processDXT5Block(pixelsPtr *[]bgra, dxt3Block *dxt3Block, blockX uint16, bl
 		// fmt.Printf("---- ---- 0000 ---- ---- 00ff ")
 	}
 
-	// for i = 0; i < 8; i++ {
-	// 	fmt.Printf("%02x ", alphas[i])
-	// }
-	// fmt.Printf("%016x\n", blockAlpha)
+	//for i = 0; i < 8; i++ {
+	//	fmt.Printf("%02x ", alphas[i])
+	//}
+	//fmt.Printf("%016x\n", blockAlpha)
 
 	var y uint16
 	var x uint16
@@ -115,12 +132,7 @@ func processDXT5Block(pixelsPtr *[]bgra, dxt3Block *dxt3Block, blockX uint16, bl
 			alphaIndex := blockAlpha & 7
 			pixel.a = alphas[alphaIndex]
 
-			// if pixel.a != 0xFF {
-			// 	pixel.r = 0xFF
-			// 	pixel.g = 0
-			// 	pixel.b = 0xFF
-			// 	pixel.a = 0xFF
-			// }
+			//fmt.Printf("%02x_%02x ", alphaIndex, pixel.a)
 
 			pixels[curPixel] = pixel
 
@@ -129,4 +141,6 @@ func processDXT5Block(pixelsPtr *[]bgra, dxt3Block *dxt3Block, blockX uint16, bl
 			blockAlpha >>= 3
 		}
 	}
+
+	//fmt.Printf("\n")
 }

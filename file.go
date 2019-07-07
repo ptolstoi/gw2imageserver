@@ -23,12 +23,12 @@ const (
 	fccDXT1 = "\x44\x58\x54\x31"
 	fccDXT5 = "\x44\x58\x54\x35"
 
-	fccATEXn uint32 = 0x58455441
-	fccATTXn uint32 = 0x58545441
-	fccATECn uint32 = 0x43455441
-	fccATEPn uint32 = 0x50455441
-	fccATEUn uint32 = 0x55455441
-	fccATETn uint32 = 0x54455441
+	//fccATEXn uint32 = 0x58455441
+	//fccATTXn uint32 = 0x58545441
+	//fccATECn uint32 = 0x43455441
+	//fccATEPn uint32 = 0x50455441
+	//fccATEUn uint32 = 0x55455441
+	//fccATETn uint32 = 0x54455441
 
 	fccDXT1n uint32 = 0x31545844
 	fccDXT5n uint32 = 0x35545844
@@ -51,19 +51,19 @@ func (app *app) fetchFile(fileID string) (*file, error) {
 	log.Printf("[fetchFile] fetching %v", url)
 
 	request, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
 	request.AddCookie(&http.Cookie{
 		Name:  "authCookie",
 		Value: "access=/latest/*!/manifest/program/*!/program/*~md5=4e51ad868f87201ad93e428ff30c6691",
 	})
-	if err != nil {
-		return nil, err
-	}
 
 	response, err := app.httpClient.Do(request)
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	body, err := ioutil.ReadAll(response.Body)
 	if err != nil {
@@ -116,7 +116,7 @@ func (app *app) noFileInCache(fileID string, fileType string) (*file, error) {
 		return nil, fmt.Errorf("unknown ATEX texture format: %v", format)
 	}
 
-	// log.Printf("width: %v, height: %v, format: %v, numBlocks: %v", width, height, format, numBlocks)
+	//log.Printf("width: %v, height: %v, format: %v, numBlocks: %v", width, height, format, numBlocks)
 
 	imgRaw, err := inflate(data, width, height)
 
@@ -154,7 +154,11 @@ func checkHeader(data []byte) error {
 func (app *app) saveFileAsPNG(fileID string, imgRaw *image.Image) (*file, error) {
 	buffer := new(bytes.Buffer)
 
-	if err := png.Encode(buffer, *imgRaw); err != nil {
+	encoder := png.Encoder{
+		CompressionLevel: png.BestCompression,
+	}
+
+	if err := encoder.Encode(buffer, *imgRaw); err != nil {
 		return nil, err
 	}
 

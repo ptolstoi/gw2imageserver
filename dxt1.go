@@ -19,7 +19,7 @@ type dxt1Block struct {
 func processDXT1(data *[]uint8, width uint16, height uint16) (*[]bgra, error) {
 	numPixels := uint32(width) * uint32(height)
 
-	// log.Printf("processDXT1: %v * %v = %v\n", width, height, numPixels)
+	//log.Printf("processDXT1: %v * %v = %v\n", width, height, numPixels)
 
 	blocks := make([]dxt1Block, len(*data)/8)
 
@@ -33,7 +33,7 @@ func processDXT1(data *[]uint8, width uint16, height uint16) (*[]bgra, error) {
 	numHorizBlocks := width >> 2
 	numVertBlocks := height >> 2
 
-	// log.Printf("processDXT1: %v %v", numHorizBlocks, numVertBlocks)
+	//log.Printf("processDXT1: %v %v", numHorizBlocks, numVertBlocks)
 
 	var y uint16
 	var x uint16

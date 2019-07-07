@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"log"
 )
 
 const (
@@ -65,11 +65,11 @@ func newHuffmanTree() *huffmanTree {
 
 	// log.Printf("workingBitTab\n")
 	// for _, v := range workingBitTab {
-	// 	fmt.Printf("%04X\n", uint16(v))
+	// 	fmt.Printf("%04x\n", uint16(v))
 	// }
 	// log.Printf("workingCodeTab\n")
 	// for _, v := range workingCodeTab {
-	// 	fmt.Printf("%04X\n", uint16(v))
+	// 	fmt.Printf("%04x\n", uint16(v))
 	// }
 
 	tree.buildHuffmanTree(&workingBitTab, &workingCodeTab)
@@ -160,7 +160,7 @@ func (tree *huffmanTree) buildHuffmanTree(workingBitTab *[]uint16, workingCodeTa
 			}
 
 			// Minimum code value for aNbBits bits
-			tree.codeCompTab[aCodeCompTabIndex] = ((aCode + 1) << (32 - aNbBits))
+			tree.codeCompTab[aCodeCompTabIndex] = (aCode + 1) << (32 - aNbBits)
 
 			// Number of bits for l_codeCompIndex index
 			tree.codeBitsTab[aCodeCompTabIndex] = aNbBits
@@ -176,13 +176,13 @@ func (tree *huffmanTree) buildHuffmanTree(workingBitTab *[]uint16, workingCodeTa
 }
 
 func fillWorkingTabsHelper(
-	iBits uint8, iSymbol uint16, workingBitTab *[]uint16, workingCodeTab *[]uint16) error {
+	iBits uint8, iSymbol uint16, workingBitTab *[]uint16, workingCodeTab *[]uint16) {
 
 	if uint32(iBits) >= maxCodeBitsLength {
-		return fmt.Errorf("Too many bits, got %v expected less than %v", iBits, maxCodeBitsLength)
+		log.Fatalf("Too many bits, got %v expected less than %v", iBits, maxCodeBitsLength)
 	}
 	if uint16(iSymbol) >= uint16(maxSymbolValue) {
-		return fmt.Errorf("Too gith symbol, got %v expected less than %v", iSymbol, maxSymbolValue)
+		log.Fatalf("Too gith symbol, got %v expected less than %v", iSymbol, maxSymbolValue)
 	}
 
 	if (*workingBitTab)[iBits] == 0xFFFF {
@@ -191,6 +191,4 @@ func fillWorkingTabsHelper(
 		(*workingCodeTab)[iSymbol] = (*workingBitTab)[iBits]
 		(*workingBitTab)[iBits] = iSymbol
 	}
-
-	return nil
 }

@@ -89,7 +89,7 @@ func (app *app) getFileFromCache(fileToLookup string, fileTypeToLookup string) (
 }
 
 func (app *app) saveFileToCache(file *file) error {
-	log.Printf("[saveFileToCache] %v %v", file.file, file.fileType)
+	log.Printf("[saveFileToCache] file=%v type=%v size=%v time=%v", file.file, file.fileType, len(file.content), file.lastModified)
 
 	lastModified := file.lastModified.Format(time.RFC1123Z)
 
@@ -107,5 +107,7 @@ func (app *app) saveFileToCache(file *file) error {
 }
 
 func (app *app) closeDB() {
-	app.db.Close()
+	if err := app.db.Close(); err != nil {
+		log.Printf("[closeDB] %v", err)
+	}
 }
