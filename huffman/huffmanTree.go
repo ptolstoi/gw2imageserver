@@ -1,4 +1,4 @@
-package main
+package huffman
 
 import (
 	"log"
@@ -7,8 +7,17 @@ import (
 const (
 	maxCodeBitsLength uint32 = 32  // Max number of bits per code
 	maxSymbolValue    uint32 = 285 // Max value for a symbol
-	maxNbBitsHash     uint32 = 8
+	MaxNbBitsHash     uint32 = 8
 )
+
+type HuffmanTree interface {
+	IsEmpty() bool
+	GetSymbolValueHash(uint32) uint16
+	GetSymbolValue(uint32) uint16
+	GetCodeBitsHash(uint32) uint8
+	GetCodeBits(uint32) uint8
+	GetCodeComp(uint32) uint32
+}
 
 type huffmanTree struct {
 	codeCompTab             [maxCodeBitsLength]uint32
@@ -16,10 +25,34 @@ type huffmanTree struct {
 	symbolValueTab          [maxSymbolValue]uint16
 	codeBitsTab             [maxCodeBitsLength]uint8
 
-	symbolValueHashTab [1 << maxNbBitsHash]uint16
-	codeBitsHashTab    [1 << maxNbBitsHash]uint8
+	symbolValueHashTab [1 << MaxNbBitsHash]uint16
+	codeBitsHashTab    [1 << MaxNbBitsHash]uint8
 
 	isEmpty bool
+}
+
+func (tree *huffmanTree) IsEmpty() bool {
+	return tree.isEmpty
+}
+
+func (tree *huffmanTree) GetSymbolValueHash(symbol uint32) uint16 {
+	return tree.symbolValueHashTab[symbol]
+}
+
+func (tree *huffmanTree) GetSymbolValue(symbol uint32) uint16 {
+	return tree.symbolValueTab[symbol]
+}
+
+func (tree *huffmanTree) GetCodeBitsHash(code uint32) uint8 {
+	return tree.codeBitsHashTab[code]
+}
+
+func (tree *huffmanTree) GetCodeBits(code uint32) uint8 {
+	return tree.codeBitsTab[code]
+}
+
+func (tree *huffmanTree) GetCodeComp(code uint32) uint32 {
+	return tree.codeCompTab[code]
 }
 
 func memset(ptr *[]uint16, value uint16, count uint32) {
@@ -29,7 +62,7 @@ func memset(ptr *[]uint16, value uint16, count uint32) {
 	}
 }
 
-func newHuffmanTree() *huffmanTree {
+func NewHuffmanTree() HuffmanTree {
 	tree := huffmanTree{}
 
 	var aWorkingBitTab [maxCodeBitsLength]uint16
@@ -114,36 +147,13 @@ func (tree *huffmanTree) buildHuffmanTree(workingBitTab *[]uint16, workingCodeTa
 		tree.symbolValueHashTab[i] = 0xFF
 	}
 
-	var aCode uint32
-	var aNbBits uint8
+	aCode, aNbBits := tree.fillFirstPart(workingBitTab, workingCodeTab)
+	tree.fillSecondPart(aNbBits, aCode, workingBitTab, workingCodeTab)
+}
 
-	// First part, filling hashTable for codes that are of less than 8 bits
-	for aNbBits <= uint8(maxNbBitsHash) {
-		if (*workingBitTab)[aNbBits] != 0xFFFF {
-			tree.isEmpty = false
-
-			aCurrentSymbol := (*workingBitTab)[aNbBits]
-			for aCurrentSymbol != 0xFFFF {
-				aHashValue := uint16(aCode << (maxNbBitsHash - uint32(aNbBits)))
-				aNextHashValue := uint16((aCode + 1) << (maxNbBitsHash - uint32(aNbBits)))
-
-				for aHashValue < aNextHashValue {
-					tree.symbolValueHashTab[aHashValue] = aCurrentSymbol
-					tree.codeBitsHashTab[aHashValue] = aNbBits
-					aHashValue++
-				}
-
-				aCurrentSymbol = (*workingCodeTab)[aCurrentSymbol]
-				aCode--
-			}
-		}
-		aCode = (aCode << 1) + 1
-		aNbBits++
-	}
-
+func (tree *huffmanTree) fillSecondPart(aNbBits uint8, aCode uint32, workingBitTab *[]uint16, workingCodeTab *[]uint16) {
 	var aCodeCompTabIndex uint16
 	var aSymbolOffset uint16
-
 	// Second part, filling classical structure for other codes
 	for aNbBits < uint8(maxCodeBitsLength) {
 		if (*workingBitTab)[aNbBits] != 0xFFFF {
@@ -173,6 +183,35 @@ func (tree *huffmanTree) buildHuffmanTree(workingBitTab *[]uint16, workingCodeTa
 		aCode = (aCode << 1) + 1
 		aNbBits++
 	}
+}
+
+func (tree *huffmanTree) fillFirstPart(workingBitTab *[]uint16, workingCodeTab *[]uint16) (uint32, uint8) {
+	var aCode uint32
+	var aNbBits uint8
+	// First part, filling hashTable for codes that are of less than 8 bits
+	for aNbBits <= uint8(MaxNbBitsHash) {
+		if (*workingBitTab)[aNbBits] != 0xFFFF {
+			tree.isEmpty = false
+
+			aCurrentSymbol := (*workingBitTab)[aNbBits]
+			for aCurrentSymbol != 0xFFFF {
+				aHashValue := uint16(aCode << (MaxNbBitsHash - uint32(aNbBits)))
+				aNextHashValue := uint16((aCode + 1) << (MaxNbBitsHash - uint32(aNbBits)))
+
+				for aHashValue < aNextHashValue {
+					tree.symbolValueHashTab[aHashValue] = aCurrentSymbol
+					tree.codeBitsHashTab[aHashValue] = aNbBits
+					aHashValue++
+				}
+
+				aCurrentSymbol = (*workingCodeTab)[aCurrentSymbol]
+				aCode--
+			}
+		}
+		aCode = (aCode << 1) + 1
+		aNbBits++
+	}
+	return aCode, aNbBits
 }
 
 func fillWorkingTabsHelper(

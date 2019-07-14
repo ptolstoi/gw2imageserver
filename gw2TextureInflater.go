@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ptolstoi/gw2imageserver/huffman"
 	"image"
 	imageColor "image/color"
 	"log"
@@ -23,7 +24,7 @@ type inflaterState struct {
 	colorBitMap []bool
 	alphaBitMap []bool
 
-	huffmanTree huffmanTree
+	huffmanTree huffman.HuffmanTree
 }
 
 type format struct {
@@ -41,6 +42,7 @@ type fullFormat struct {
 
 	width  uint16
 	height uint16
+	fourCC uint32
 }
 
 type bgra struct {
@@ -66,7 +68,7 @@ const (
 )
 
 func newInflaterState(input *[]uint32) *inflaterState {
-	tree := newHuffmanTree()
+	tree := huffman.NewHuffmanTree()
 
 	state := inflaterState{
 		input:     *input,
@@ -79,7 +81,7 @@ func newInflaterState(input *[]uint32) *inflaterState {
 
 		isEmpty: false,
 
-		huffmanTree: *tree,
+		huffmanTree: tree,
 	}
 	return &state
 }
@@ -92,53 +94,9 @@ func inflate(inputRaw []byte, origWidth uint16, origHeight uint16) (image.Image,
 
 	state := newInflaterState(&input)
 
-	// skip header
-	// log.Printf("skipping header")
-	if err := state.needBits(32); err != nil {
+	aFullFormat, err := state.readFullFormat()
+	if err != nil {
 		return nil, err
-	}
-	if err := state.dropBits(32); err != nil {
-		return nil, err
-	}
-
-	// log.Printf("reading format")
-	// format
-	if err := state.needBits(32); err != nil {
-		return nil, err
-	}
-	formatFourCC := state.readBits(32)
-	if err := state.dropBits(32); err != nil {
-		return nil, err
-	}
-
-	//log.Printf("fourmatFourCC: % x", formatFourCC)
-
-	format := deductFormat(string(formatFourCC&0xFF) + string(formatFourCC&0xFF00>>8) + string(formatFourCC&0xFF0000>>16) + string(formatFourCC&0xFF000000>>24))
-	aFullFormat := fullFormat{
-		format: &format,
-	}
-
-	// log.Printf("reading size")
-	if err := state.needBits(32); err != nil {
-		return nil, err
-	}
-	aFullFormat.height = uint16(state.readBits(16))
-	//log.Printf("width=%v", aFullFormat.width)
-	if err := state.dropBits(16); err != nil {
-		return nil, err
-	}
-	aFullFormat.width = uint16(state.readBits(16))
-	//log.Printf("height=%v", aFullFormat.height)
-	if err := state.dropBits(16); err != nil {
-		return nil, err
-	}
-
-	aFullFormat.nbObPixelBlocks = uint32((aFullFormat.width+3)/4) * uint32((aFullFormat.height+3)/4)
-	aFullFormat.bytesPerPixelBlock = uint32(aFullFormat.pixelSizeInBits) * 4 * 4 / 8
-	aFullFormat.hasTwoComponents = ((aFullFormat.flags & (ffPlainComp | ffColor | ffAlpha)) == (ffPlainComp | ffColor | ffAlpha)) || (aFullFormat.flags&ffBiColorComp) != 0
-	aFullFormat.bytesPerComponent = aFullFormat.bytesPerPixelBlock
-	if aFullFormat.hasTwoComponents {
-		aFullFormat.bytesPerComponent = aFullFormat.bytesPerPixelBlock / 2
 	}
 
 	//log.Printf("FullFormat: {flags:% 016b(%[1]v) pixelSizeInBits:%v} %+v",
@@ -150,7 +108,7 @@ func inflate(inputRaw []byte, origWidth uint16, origHeight uint16) (image.Image,
 
 	// log.Printf("anOutputSize: %v", anOutputSize)
 
-	result, err := state.inflateData(aFullFormat, anOutputSize)
+	result, err := state.inflateData(*aFullFormat, anOutputSize)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +116,7 @@ func inflate(inputRaw []byte, origWidth uint16, origHeight uint16) (image.Image,
 	//log.Printf("afterInflate: inputPos=%v len(input)=%v inputSize=%v", state.inputPos, len(state.input), state.inputSize)
 
 	var colors *[]bgra
-	if formatFourCC == fccDXT1n {
+	if aFullFormat.fourCC == fccDXT1n {
 		// log.Printf("fccDXT1")
 		var err error
 		colors, err = processDXT1(&result, aFullFormat.width, aFullFormat.height)
@@ -168,7 +126,7 @@ func inflate(inputRaw []byte, origWidth uint16, origHeight uint16) (image.Image,
 		}
 
 		// log.Printf("colors: %v", len(*colors))
-	} else if formatFourCC == fccDXT5n {
+	} else if aFullFormat.fourCC == fccDXT5n {
 		// log.Printf("fccDXT5")
 
 		var err error
@@ -177,11 +135,11 @@ func inflate(inputRaw []byte, origWidth uint16, origHeight uint16) (image.Image,
 			return nil, err
 		}
 	} else {
-		f := formatFourCC
+		f := aFullFormat.fourCC
 		c := func(a uint32) string {
 			return string(a)
 		}
-		return nil, fmt.Errorf("unknown formatFourCC: 0x%08x (%v%v%v%v)", formatFourCC,
+		return nil, fmt.Errorf("unknown formatFourCC: 0x%08x (%v%v%v%v)", aFullFormat.fourCC,
 			c((f>>0)&0xFF), c((f>>8)&0xFF), c((f>>16)&0xFF), c((f>>24)&0xFF),
 		)
 	}
@@ -239,30 +197,8 @@ func (state *inflaterState) inflateData(fullFormat fullFormat, outputSize uint32
 
 	// log.Printf("aDataSize: %v, aCompressionFlags: %032b", aDataSize, aCompressionFlags)
 
-	if aCompressionFlags&cfDecodeWhiteColor != 0 {
-		//log.Printf("cfDecodeWhiteColor")
-		// return nil, fmt.Errorf("cfDecodeWhiteColor not implemented")
-		if err := state.decodeWhiteColor(&ioOutputTab, fullFormat); err != nil {
-			return nil, err
-		}
-	}
-	if aCompressionFlags&cfDecodeConstantAlphaFrom4Bits != 0 {
-		// log.Printf("cfDecodeConstantAlphaFrom4Bits")
-		return nil, fmt.Errorf("cfDecodeConstantAlphaFrom4Bits not implemented")
-	}
-	if aCompressionFlags&cfDecodeConstantAlphaFrom8Bits != 0 {
-		//log.Printf("cfDecodeConstantAlphaFrom8Bits")
-		// return nil, fmt.Errorf("cfDecodeConstantAlphaFrom8Bits not implemented")
-		if err := state.decodeConstantAlphaFrom8Bits(&ioOutputTab, fullFormat); err != nil {
-			return nil, err
-		}
-	}
-	if aCompressionFlags&cfDecodePlainColor != 0 {
-		//log.Printf("cfDecodePlainColor")
-		// return nil, fmt.Errorf("cfDecodePlainColor not implemented")
-		if err := state.decodePlainColor(&ioOutputTab, fullFormat); err != nil {
-			return nil, err
-		}
+	if err := state.decompress(aCompressionFlags, &ioOutputTab, fullFormat); err != nil {
+		return nil, err
 	}
 
 	if state.bits >= 32 {
@@ -885,7 +821,7 @@ func (state *inflaterState) readBits(bits uint8) uint32 {
 }
 
 func (state *inflaterState) readCode() (ioCode uint16, err error) {
-	if state.huffmanTree.isEmpty {
+	if state.huffmanTree.IsEmpty() {
 		return 0, fmt.Errorf("huffmanTree not initialized")
 	}
 
@@ -893,32 +829,116 @@ func (state *inflaterState) readCode() (ioCode uint16, err error) {
 		return 0, err
 	}
 
-	symbol := state.readBits(uint8(maxNbBitsHash))
+	symbol := state.readBits(uint8(huffman.MaxNbBitsHash))
 
-	if state.huffmanTree.symbolValueHashTab[symbol] != 0xFFFF {
-		ioCode = uint16(state.huffmanTree.symbolValueHashTab[symbol])
-		bitsToDrop := state.huffmanTree.codeBitsHashTab[symbol]
+	if state.huffmanTree.GetSymbolValueHash(symbol) != 0xFFFF {
+		ioCode = uint16(state.huffmanTree.GetSymbolValueHash(symbol))
+		bitsToDrop := state.huffmanTree.GetCodeBitsHash(symbol)
 		if err := state.dropBits(bitsToDrop); err != nil {
 			return 0, err
 		}
 	} else {
-		var anIndex uint16
+		var anIndex uint32
 		tmp := state.readBits(32)
-		for tmp < state.huffmanTree.codeCompTab[anIndex] {
+		for tmp < state.huffmanTree.GetCodeComp(anIndex) {
 			anIndex++
 		}
 
-		aNbBits := state.huffmanTree.codeBitsTab[anIndex]
-		symbol = uint32(state.huffmanTree.symbolValueTabOffsetTab[anIndex]) -
-			((tmp - state.huffmanTree.codeCompTab[anIndex]) >> (32 - aNbBits))
+		aNbBits := state.huffmanTree.GetCodeBits(anIndex)
+		symbol = uint32(state.huffmanTree.GetSymbolValueHash(anIndex)) -
+			((tmp - state.huffmanTree.GetCodeComp(anIndex)) >> (32 - aNbBits))
 
-		ioCode = state.huffmanTree.symbolValueTab[symbol]
+		ioCode = state.huffmanTree.GetSymbolValue(symbol)
 		if err := state.dropBits(aNbBits); err != nil {
 			return 0, err
 		}
 	}
 
 	return
+}
+
+func (state *inflaterState) decompress(aCompressionFlags uint32, ioOutputTab *[]uint8, fullFormat fullFormat) error {
+	if aCompressionFlags&cfDecodeWhiteColor != 0 {
+		//log.Printf("cfDecodeWhiteColor")
+		// return nil, fmt.Errorf("cfDecodeWhiteColor not implemented")
+		if err := state.decodeWhiteColor(ioOutputTab, fullFormat); err != nil {
+			return err
+		}
+	}
+	if aCompressionFlags&cfDecodeConstantAlphaFrom4Bits != 0 {
+		// log.Printf("cfDecodeConstantAlphaFrom4Bits")
+		return fmt.Errorf("cfDecodeConstantAlphaFrom4Bits not implemented")
+	}
+	if aCompressionFlags&cfDecodeConstantAlphaFrom8Bits != 0 {
+		//log.Printf("cfDecodeConstantAlphaFrom8Bits")
+		// return fmt.Errorf("cfDecodeConstantAlphaFrom8Bits not implemented")
+		if err := state.decodeConstantAlphaFrom8Bits(ioOutputTab, fullFormat); err != nil {
+			return err
+		}
+	}
+	if aCompressionFlags&cfDecodePlainColor != 0 {
+		//log.Printf("cfDecodePlainColor")
+		// return fmt.Errorf("cfDecodePlainColor not implemented")
+		if err := state.decodePlainColor(ioOutputTab, fullFormat); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (state *inflaterState) readFullFormat() (*fullFormat, error) {
+	// skip header
+	// log.Printf("skipping header")
+	if err := state.needBits(32); err != nil {
+		return nil, err
+	}
+	if err := state.dropBits(32); err != nil {
+		return nil, err
+	}
+
+	// log.Printf("reading format")
+	// format
+	if err := state.needBits(32); err != nil {
+		return nil, err
+	}
+	formatFourCC := state.readBits(32)
+	if err := state.dropBits(32); err != nil {
+		return nil, err
+	}
+
+	//log.Printf("fourmatFourCC: % x", formatFourCC)
+
+	format := deductFormat(string(formatFourCC&0xFF) + string(formatFourCC&0xFF00>>8) + string(formatFourCC&0xFF0000>>16) + string(formatFourCC&0xFF000000>>24))
+	aFullFormat := fullFormat{
+		format: &format,
+		fourCC: formatFourCC,
+	}
+
+	// log.Printf("reading size")
+	if err := state.needBits(32); err != nil {
+		return nil, err
+	}
+	aFullFormat.height = uint16(state.readBits(16))
+	//log.Printf("width=%v", aFullFormat.width)
+	if err := state.dropBits(16); err != nil {
+		return nil, err
+	}
+	aFullFormat.width = uint16(state.readBits(16))
+	//log.Printf("height=%v", aFullFormat.height)
+	if err := state.dropBits(16); err != nil {
+		return nil, err
+	}
+
+	aFullFormat.nbObPixelBlocks = uint32((aFullFormat.width+3)/4) * uint32((aFullFormat.height+3)/4)
+	aFullFormat.bytesPerPixelBlock = uint32(aFullFormat.pixelSizeInBits) * 4 * 4 / 8
+	aFullFormat.hasTwoComponents = ((aFullFormat.flags & (ffPlainComp | ffColor | ffAlpha)) == (ffPlainComp | ffColor | ffAlpha)) || (aFullFormat.flags&ffBiColorComp) != 0
+	aFullFormat.bytesPerComponent = aFullFormat.bytesPerPixelBlock
+	if aFullFormat.hasTwoComponents {
+		aFullFormat.bytesPerComponent = aFullFormat.bytesPerPixelBlock / 2
+	}
+
+	return &aFullFormat, nil
 }
 
 func deductFormat(fourcc string) format {
