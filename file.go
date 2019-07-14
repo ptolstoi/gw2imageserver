@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ptolstoi/gw2imageserver/textureInflater"
 	"image"
 	"image/png"
 	"io/ioutil"
@@ -20,18 +21,12 @@ const (
 	fccATEU = "\x41\x54\x45\x55"
 	fccATET = "\x41\x54\x45\x54"
 
-	fccDXT1 = "\x44\x58\x54\x31"
-	fccDXT5 = "\x44\x58\x54\x35"
-
 	//fccATEXn uint32 = 0x58455441
 	//fccATTXn uint32 = 0x58545441
 	//fccATECn uint32 = 0x43455441
 	//fccATEPn uint32 = 0x50455441
 	//fccATEUn uint32 = 0x55455441
 	//fccATETn uint32 = 0x54455441
-
-	fccDXT1n uint32 = 0x31545844
-	fccDXT5n uint32 = 0x35545844
 )
 
 type file struct {
@@ -108,9 +103,9 @@ func (app *app) noFileInCache(fileID string, fileType string) (*file, error) {
 	height := binary.LittleEndian.Uint16(data[10:12])
 	numBlocks := uint32((width+3)>>2) * uint32((height+3)>>2)
 
-	if format == fccDXT1 {
+	if format == textureInflater.FccDXT1 {
 		numBlocks *= 8
-	} else if format == fccDXT5 {
+	} else if format == textureInflater.FccDXT5 {
 		numBlocks *= 16
 	} else {
 		return nil, fmt.Errorf("unknown ATEX texture format: %v", format)
@@ -118,7 +113,7 @@ func (app *app) noFileInCache(fileID string, fileType string) (*file, error) {
 
 	//log.Printf("width: %v, height: %v, format: %v, numBlocks: %v", width, height, format, numBlocks)
 
-	imgRaw, err := inflate(data, width, height)
+	imgRaw, err := textureInflater.Inflate(data, width, height)
 
 	if err != nil {
 		return nil, err
@@ -144,7 +139,7 @@ func checkHeader(data []byte) error {
 
 	compression := string(data[4:8])
 
-	if compression != fccDXT1 && compression != fccDXT5 {
+	if compression != textureInflater.FccDXT1 && compression != textureInflater.FccDXT5 {
 		return fmt.Errorf("unknown compression: %v", compression)
 	}
 
