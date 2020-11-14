@@ -3,3 +3,5 @@
 /*.db
 /.scannerwork
 /vendor
+/bin
+/.cache
