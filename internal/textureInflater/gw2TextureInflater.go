@@ -147,7 +147,7 @@ func Inflate(inputRaw []byte, origWidth uint16, origHeight uint16) (image.Image,
 	} else {
 		f := aFullFormat.fourCC
 		c := func(a uint32) string {
-			return string(a)
+			return string(rune(a))
 		}
 		return nil, fmt.Errorf("unknown formatFourCC: 0x%08x (%v%v%v%v)", aFullFormat.fourCC,
 			c((f>>0)&0xFF), c((f>>8)&0xFF), c((f>>16)&0xFF), c((f>>24)&0xFF),
@@ -567,7 +567,10 @@ func (state *inflaterState) readFullFormat() (*fullFormat, error) {
 
 	//log.Printf("fourmatFourCC: % x", formatFourCC)
 
-	format := deductFormat(string(formatFourCC&0xFF) + string(formatFourCC&0xFF00>>8) + string(formatFourCC&0xFF0000>>16) + string(formatFourCC&0xFF000000>>24))
+	format := deductFormat(string(rune(formatFourCC&0xFF)) +
+		string(rune(formatFourCC&0xFF00>>8)) +
+		string(rune(formatFourCC&0xFF0000>>16)) +
+		string(rune(formatFourCC&0xFF000000>>24)))
 	aFullFormat := fullFormat{
 		format: &format,
 		fourCC: formatFourCC,
