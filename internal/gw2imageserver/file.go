@@ -1,4 +1,4 @@
-package main
+package gw2imageserver
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ptolstoi/gw2imageserver/textureInflater"
+	"github.com/ptolstoi/gw2imageserver/internal/textureInflater"
 )
 
 const (

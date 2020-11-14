@@ -4,18 +4,17 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/ptolstoi/gw2imageserver/huffman"
 	"image"
 	imageColor "image/color"
 	"log"
+
+	"github.com/ptolstoi/gw2imageserver/internal/huffman"
 )
 
-const
-(
+const (
 	FccDXT1 = "\x44\x58\x54\x31"
 
 	FccDXT5 = "\x44\x58\x54\x35"
-
 
 	fccDXT1n uint32 = 0x31545844
 	fccDXT5n uint32 = 0x35545844

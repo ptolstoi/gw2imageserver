@@ -1,4 +1,4 @@
-package main
+package gw2imageserver
 
 import (
 	"database/sql"
@@ -16,7 +16,11 @@ type app struct {
 	httpClient *http.Client
 }
 
-func newApp(config neversorrow.Config) (*app, error) {
+type App interface {
+	RunUntilSignal() error
+}
+
+func NewApp(config neversorrow.Config) (App, error) {
 	neversorrowApp, err := neversorrow.New(config)
 	if err != nil {
 		return nil, err
@@ -38,6 +42,11 @@ func newApp(config neversorrow.Config) (*app, error) {
 	app.OnClose(app.close)
 
 	return &app, nil
+}
+
+func (app *app) RunUntilSignal() error {
+	_, err := app.App.RunUntilSignal()
+	return err
 }
 
 func (app *app) close(neversorrow.App) {

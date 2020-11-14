@@ -1,4 +1,4 @@
-package main
+package gw2imageserver
 
 import (
 	"fmt"

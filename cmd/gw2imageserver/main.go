@@ -6,6 +6,7 @@ import (
 	"os"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/ptolstoi/gw2imageserver/internal/gw2imageserver"
 	"github.com/ptolstoi/neversorrow"
 )
 
@@ -33,14 +34,14 @@ func main() {
 		ShowStacktrace: _showStacktrace == "",
 	}
 
-	app, err := newApp(config)
+	app, err := gw2imageserver.NewApp(config)
 	if err != nil {
 		log.Fatalf("couldn't create neversorrow: %v", err)
 	}
 
 	// _, _ = http.Get("http://localhost:7089/v1/image/66955.png?noCache")
 
-	if _, err := app.RunUntilSignal(); err != nil {
+	if err := app.RunUntilSignal(); err != nil {
 		log.Fatalf("error: %v", err)
 	}
 }
