@@ -8,10 +8,10 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func (app *app) initDB() {
+func (app *app) initDB() error {
 	db, err := sql.Open("sqlite3", "./cache.db")
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	_, err = db.Exec(`
@@ -28,7 +28,7 @@ func (app *app) initDB() {
 	`)
 
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	_, err = db.Exec(`
@@ -43,10 +43,12 @@ func (app *app) initDB() {
 	`)
 
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	app.db = db
+
+	return nil
 }
 
 func (app *app) getFileFromCache(fileToLookup string, fileTypeToLookup string) (*file, error) {

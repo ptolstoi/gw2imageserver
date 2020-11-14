@@ -2,26 +2,45 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
-	"os/signal"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/ptolstoi/neversorrow"
+)
+
+var (
+	_version   string = "UNSET"
+	_buildTime string = "UNSET"
+
+	_showStacktrace string = ""
 )
 
 func main() {
 	fmt.Printf("\n\n\n\n\n\nStarting GW2ImageServer\n=======================\n")
 
-	app := newApp()
-	defer app.close()
+	listenOn := "localhost:7089"
 
-	app.start()
+	if len(os.Args) > 1 {
+		listenOn = os.Args[1]
+	}
+
+	config := neversorrow.Config{
+		Address: neversorrow.EnvOr("ADDRESS", listenOn),
+
+		Version:        _version,
+		BuildTime:      _buildTime,
+		ShowStacktrace: _showStacktrace == "",
+	}
+
+	app, err := newApp(config)
+	if err != nil {
+		log.Fatalf("couldn't create neversorrow: %v", err)
+	}
 
 	// _, _ = http.Get("http://localhost:7089/v1/image/66955.png?noCache")
 
-	stopChannel := make(chan os.Signal, 1)
-	signal.Notify(stopChannel, os.Interrupt)
-
-	<-stopChannel
-
-	app.stop()
+	if _, err := app.RunUntilSignal(); err != nil {
+		log.Fatalf("error: %v", err)
+	}
 }

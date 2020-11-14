@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/ptolstoi/gw2imageserver/textureInflater"
 	"image"
 	"image/png"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/ptolstoi/gw2imageserver/textureInflater"
 )
 
 const (
@@ -75,7 +76,7 @@ func (app *app) fetchFile(fileID string) (*file, error) {
 	return &file, nil
 }
 
-func (app *app) noFileInCache(fileID string, fileType string) (*file, error) {
+func (app *app) noImageFileInCache(fileID string, fileType string) (*file, error) {
 	uncompressedFile, err := app.getFileFromCache(fileID, "uncompressed")
 
 	if uncompressedFile == nil && err == nil {
@@ -120,7 +121,7 @@ func (app *app) noFileInCache(fileID string, fileType string) (*file, error) {
 	}
 
 	if fileType == "png" {
-		return app.saveFileAsPNG(fileID, &imgRaw)
+		return app.saveImageAsPNG(fileID, &imgRaw)
 	}
 
 	return nil, fmt.Errorf("unknown file type")
@@ -146,7 +147,7 @@ func checkHeader(data []byte) error {
 	return nil
 }
 
-func (app *app) saveFileAsPNG(fileID string, imgRaw *image.Image) (*file, error) {
+func (app *app) saveImageAsPNG(fileID string, imgRaw *image.Image) (*file, error) {
 	buffer := new(bytes.Buffer)
 
 	encoder := png.Encoder{
