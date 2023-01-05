@@ -385,9 +385,9 @@ func processDXTColor(pixel *[4]bgra, block *dxtColor, setAlpha bool, isDXT1 bool
 		pixel[3].b = 0
 
 		if setAlpha {
-			pixel[0].a = 0x00
-			pixel[1].a = 0x00
-			pixel[2].a = 0x00
+			pixel[0].a = 0xFF
+			pixel[1].a = 0xFF
+			pixel[2].a = 0xFF
 			pixel[3].a = 0x00
 		}
 	}
